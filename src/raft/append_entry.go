@@ -19,5 +19,5 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) appendEntries(heartbeat bool) {
-
+	lastLog := rf.log.lastLog()
 }

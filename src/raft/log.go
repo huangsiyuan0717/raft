@@ -15,6 +15,14 @@ func (l *Log) append(entries ...Entry) {
 	l.Entries = append(l.Entries, entries...)
 }
 
+func (l *Log) len() int {
+	return len(l.Entries)
+}
+
+func (l *Log) lastLog() *Entry {
+	return l.at(l.len() - 1)
+}
+
 func makeEmptyLog() Log {
 	log := Log{
 		Entries: make([]Entry, 0),
