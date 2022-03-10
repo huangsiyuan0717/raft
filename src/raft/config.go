@@ -8,19 +8,23 @@ package raft
 // test with the original before submitting.
 //
 
-import "6.824/labgob"
-import "6.824/labrpc"
-import "bytes"
-import "log"
-import "sync"
-import "testing"
-import "runtime"
-import "math/rand"
-import crand "crypto/rand"
-import "math/big"
-import "encoding/base64"
-import "time"
-import "fmt"
+import (
+	"bytes"
+	"log"
+	"math/rand"
+	"runtime"
+	"sync"
+	"testing"
+
+	"6.824/labgob"
+	"6.824/labrpc"
+
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"math/big"
+	"time"
+)
 
 func randstring(n int) string {
 	b := make([]byte, 2*n)
@@ -83,6 +87,7 @@ func make_config(t *testing.T, n int, unreliable bool, snapshot bool) *config {
 
 	cfg.net.LongDelays(true)
 
+	//这里没看懂
 	applier := cfg.applier
 	if snapshot {
 		applier = cfg.applierSnap
@@ -262,6 +267,7 @@ func (cfg *config) start1(i int, applier func(int, chan ApplyMsg)) {
 	// pass Make() the last persisted state.
 	if cfg.saved[i] != nil {
 		cfg.saved[i] = cfg.saved[i].Copy()
+		//没看懂
 	} else {
 		cfg.saved[i] = MakePersister()
 	}
@@ -377,6 +383,7 @@ func (cfg *config) checkOneLeader() int {
 		leaders := make(map[int][]int)
 		for i := 0; i < cfg.n; i++ {
 			if cfg.connected[i] {
+				// fmt.Printf("%v server connected\n", i)
 				if term, leader := cfg.rafts[i].GetState(); leader {
 					leaders[term] = append(leaders[term], i)
 				}
