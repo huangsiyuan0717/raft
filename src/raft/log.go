@@ -15,8 +15,24 @@ func (l *Log) append(entries ...Entry) {
 	l.Entries = append(l.Entries, entries...)
 }
 
+func (l *Log) truncate(i int) {
+	l.Entries = l.Entries[:i]
+}
+
+func (l *Log) append(entries ...Entry) {
+	l.Entries = append(l.Entries, entries...)
+}
+
 func (l *Log) len() int {
 	return len(l.Entries)
+}
+
+func (l *Log) silce(i int) []Entry {
+	return l.Entries[i:]
+}
+
+func (l *Log) at(i int) *Entry {
+	return &l.Entries[i]
 }
 
 func (l *Log) lastLog() *Entry {

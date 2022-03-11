@@ -20,4 +20,127 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) appendEntries(heartbeat bool) {
 	lastLog := rf.log.lastLog()
+	for peer, _ := range rf.peers {
+		if peer == rf.me {
+			rf.resetElectionTimer()
+			continue
+		}
+
+		//rule for leader 3
+		if lastLog.Index >= rf.nextIndex[peer] || heartbeat {
+			nextIndex := rf.nextIndex[peer]
+
+			if nextIndex <= 0 {
+				nextIndex = 1
+			}
+
+			if lastLog.Index+1 < nextIndex {
+				nextIndex = lastLog.Index
+			}
+
+			prevLog := rf.log.at(nextIndex - 1)
+			args := AppendEntriesArgs{
+				Term:         rf.currentTerm,
+				LeaderId:     rf.me,
+				PrevLogIndex: prevLog.Index,
+				PrevLogTerm:  prevLog.Term,
+				Entries:      make([]Entry, lastLog.Index-nextIndex+1),
+				LeaderCommit: rf.commitIndex,
+			}
+			copy(args.Entries, rf.log.silce(nextIndex))
+			go rf.leaderSendEntries(peer, &args)
+		}
+	}
+}
+
+func (rf *Raft) leaderSendEntries(serverId int, args *AppendEntriesArgs) {
+	var reply AppendEntriesReply
+	ok := rf.sendAppendEntries(serverId, args, &reply)
+	if !ok {
+		return
+	}
+}
+
+func (rf *Raft) setNewTerm(term int) {
+	if term > rf.currentTerm || rf.currentTerm == 0 {
+		rf.state = Follower
+		rf.currentTerm = term
+		rf.voteFor = -1
+		DPrintf("[%d]: set term %v\n", rf.me, rf.currentTerm)
+		rf.persist()
+	}
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	DPrintf("[%d]: (term %d) follower 收到 [%v] AppendEntries %v, prevIndex %v, prevTerm %v", rf.me, rf.currentTerm, args.LeaderId, args.Entries, args.PrevLogIndex, args.PrevLogTerm)
+	//rule for servers
+	//all servers 2
+	reply.Success = false
+	reply.Term = rf.currentTerm
+	if args.Term > rf.currentTerm {
+		rf.setNewTerm(args.Term)
+		return
+	}
+
+	if args.Term < rf.currentTerm {
+		return
+	}
+	rf.resetElectionTimer()
+
+	// Candidate rule 3
+	if rf.state == Candidate {
+		rf.state = Follower
+	}
+
+	// AppendEntries rpc 2
+	if rf.log.lastLog().Index < args.PrevLogIndex {
+		reply.Conflict = true
+		reply.XTerm = -1
+		reply.XIndex = -1
+		reply.XLen = rf.log.len()
+		DPrintf("[%v]: Conflict XTerm %v, XIndex %v, XLen %v", rf.me, reply.XTerm, reply.XIndex, reply.XLen)
+		return
+	}
+	if rf.log.at(args.PrevLogIndex).Term != args.PrevLogTerm {
+		reply.Conflict = true
+		xTerm := rf.log.at(args.PrevLogIndex).Term
+		for xIndex := args.PrevLogIndex; xIndex > 0; xIndex-- {
+			if rf.log.at(xIndex-1).Term != xTerm {
+				reply.XIndex = xIndex
+				break
+			}
+		}
+		reply.XTerm = xTerm
+		reply.XLen = rf.log.len()
+		DPrintf("[%v]: Conflict XTerm %v, XIndex %v, XLen %v", rf.me, reply.XTerm, reply.XIndex, reply.XLen)
+		return
+	}
+
+	for idx, entry := range args.Entries {
+		// AppendEntries rpc 3
+		if entry.Index <= rf.log.lastLog().Index && rf.log.at(entry.Index).Term != entry.Term {
+			rf.log.truncate(entry.Index)
+			rf.persist()
+		}
+
+		// AppendEntries rpc 4
+		if entry.Index > rf.log.lastLog().Index {
+			rf.log.append(args.Entries[idx:]...)
+			break
+		}
+	}
+
+	// AppendEntries rpc 5
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, rf.log.lastLog().Index)
+		rf.apply()
+	}
+	reply.Success = true
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
 }
