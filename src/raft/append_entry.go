@@ -30,10 +30,12 @@ func (rf *Raft) appendEntries(heartbeat bool) {
 		if lastLog.Index >= rf.nextIndex[peer] || heartbeat {
 			nextIndex := rf.nextIndex[peer]
 
+			//初始化的情况
 			if nextIndex <= 0 {
 				nextIndex = 1
 			}
 
+			//heatbeat == true的情况，心跳包
 			if lastLog.Index+1 < nextIndex {
 				nextIndex = lastLog.Index
 			}
@@ -59,16 +61,80 @@ func (rf *Raft) leaderSendEntries(serverId int, args *AppendEntriesArgs) {
 	if !ok {
 		return
 	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if reply.Term > rf.currentTerm {
+		rf.setNewTerm(reply.Term)
+	}
+
+	//为什么要判断  是rf的currenterm会变化吗？
+	if args.Term == rf.currentTerm {
+		//rules for leader 3.1
+		if reply.Success {
+			match := args.PrevLogIndex + len(args.Entries)
+			next := match + 1
+			rf.nextIndex[serverId] = max(rf.nextIndex[serverId], next)
+			rf.matchIndex[serverId] = max(rf.matchIndex[serverId], match)
+			DPrintf("[%v]: %v append success next %v match %v", rf.me, serverId, rf.nextIndex[serverId], rf.matchIndex[serverId])
+		} else if reply.Conflict {
+			DPrintf("[%v]: Conflict from %v %#v", rf.me, serverId, reply)
+			if reply.XTerm == -1 {
+				rf.nextIndex[serverId] = reply.XLen
+			} else {
+				lastLogInXTerm := rf.findLastLogInTerm(reply.XTerm)
+				DPrintf("[%v]: lastLogInXTerm %v", rf.me, lastLogInXTerm)
+				if lastLogInXTerm > 0 {
+					rf.nextIndex[serverId] = lastLogInXTerm
+				} else {
+					rf.nextIndex[serverId] = reply.XIndex
+				}
+			}
+			DPrintf("[%v]: leader nextIndex[%v] %v", rf.me, serverId, rf.nextIndex[serverId])
+		} else if rf.nextIndex[serverId] > 1 {
+			rf.nextIndex[serverId]--
+		}
+		rf.leaderCommitRule()
+	}
 }
 
-func (rf *Raft) setNewTerm(term int) {
-	if term > rf.currentTerm || rf.currentTerm == 0 {
-		rf.state = Follower
-		rf.currentTerm = term
-		rf.voteFor = -1
-		DPrintf("[%d]: set term %v\n", rf.me, rf.currentTerm)
-		rf.persist()
+func (rf *Raft) leaderCommitRule() {
+	//leader rule 4
+	if rf.state != Leader {
+		return
 	}
+
+	for n := rf.commitIndex + 1; n <= rf.log.lastLog().Index; n++ {
+		if rf.log.at(n).Term != rf.currentTerm {
+			continue
+		}
+
+		count := 1
+		for serverId := 0; serverId < len(rf.peers); serverId++ {
+			if serverId != rf.me && rf.matchIndex[serverId] >= n {
+				count++
+			}
+
+			if count > len(rf.peers)/2 {
+				rf.commitIndex = n
+				DPrintf("[%v] leader尝试提交 index %v", rf.me, rf.commitIndex)
+				rf.apply()
+				break
+			}
+		}
+
+	}
+}
+
+func (rf *Raft) findLastLogInTerm(x int) int {
+	for i := rf.log.lastLog().Index; i > 0; i-- {
+		term := rf.log.at(i).Term
+		if term == x {
+			return i
+		} else if term < x {
+			break
+		}
+	}
+	return -1
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {

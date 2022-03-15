@@ -1,5 +1,10 @@
 package raft
 
+import (
+	"fmt"
+	"strings"
+)
+
 type Entry struct {
 	Command interface{}
 	Term    int
@@ -9,10 +14,6 @@ type Entry struct {
 type Log struct {
 	Entries []Entry
 	index0  int
-}
-
-func (l *Log) append(entries ...Entry) {
-	l.Entries = append(l.Entries, entries...)
 }
 
 func (l *Log) truncate(i int) {
@@ -45,4 +46,16 @@ func makeEmptyLog() Log {
 		index0:  0,
 	}
 	return log
+}
+
+func (e *Entry) String() string {
+	return fmt.Sprint(e.Term)
+}
+
+func (l *Log) String() string {
+	nums := []string{}
+	for _, entry := range l.Entries {
+		nums = append(nums, fmt.Sprintf("%4d", entry.Term))
+	}
+	return fmt.Sprint(strings.Join(nums, "|"))
 }

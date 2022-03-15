@@ -57,8 +57,8 @@ type RaftState string
 
 const (
 	Follower  RaftState = "Follower"
-	Candidate RaftState = "Candidate"
-	Leader    RaftState = "Leader"
+	Candidate           = "Candidate"
+	Leader              = "Leader"
 )
 
 //
@@ -76,17 +76,20 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	state         RaftState
-	appendEntrych chan *Entry
+	appendEntryCh chan *Entry
 	heartBeat     time.Duration
 	electionTime  time.Time
 
+	// Persistent state on all servers:
 	currentTerm int
 	votedFor    int
 	log         Log
 
+	// Volatile state on all servers:
 	commitIndex int
 	lastApplied int
 
+	// Volatile state on leaders:
 	nextIndex  []int
 	matchIndex []int
 
@@ -100,15 +103,14 @@ type Raft struct {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
+	// DPrintVerbose("[%v]: STATE: %v", rf.me, rf.log.String())
 	// w := new(bytes.Buffer)
 	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
+	// e.Encode(rf.currentTerm)
+	// e.Encode(rf.votedFor)
+	// e.Encode(rf.log)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
-
 }
 
 //
@@ -118,19 +120,7 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var currentTerm int
@@ -165,77 +155,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 
 }
-
-// //
-// // example RequestVote RPC handler.
-// //
-// func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-// 	// Your code here (2A, 2B).
-// 	rf.mu.Lock()
-// 	defer rf.mu.Unlock()
-
-// 	//rule for servers
-// 	// all server 2
-// 	if args.Term > rf.currentTerm {
-// 		rf.setNewTerm(args.Term)
-// 	}
-
-// 	//request vote rpc receiver 1
-// 	if args.Term < rf.currentTerm {
-// 		reply.Term = rf.currentTerm
-// 		reply.VoteGranted = false
-// 		return
-// 	}
-
-// 	//request vote rpc receiver 2
-// 	myLastLog := rf.log.lastLog()
-// 	upToDate := args.LastLogTerm > myLastLog.Term ||
-// 		(args.LastLogTerm == myLastLog.Term && args.LastLogIndex >= myLastLog.Index)
-// 	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
-// 		reply.VoteGranted = true
-// 		rf.votedFor = args.CandidateId
-// 		rf.persist()
-// 		rf.resetElectionTimer()
-// 		DPrintf("[%v]: term %v vote %v", rf.me, rf.currentTerm, rf.votedFor)
-// 	} else {
-// 		reply.VoteGranted = false
-// 	}
-// 	reply.Term = rf.currentTerm
-// }
-
-//
-// example code to send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// expects RPC arguments in args.
-// fills in *reply with RPC reply, so caller should
-// pass &reply.
-// the types of the args and reply passed to Call() must be
-// the same as the types of the arguments declared in the
-// handler function (including whether they are pointers).
-//
-// The labrpc package simulates a lossy network, in which servers
-// may be unreachable, and in which requests and replies may be lost.
-// Call() sends a request and waits for a reply. If a reply arrives
-// within a timeout interval, Call() returns true; otherwise
-// Call() returns false. Thus Call() may not return for a while.
-// A false return can be caused by a dead server, a live server that
-// can't be reached, a lost request, or a lost reply.
-//
-// Call() is guaranteed to return (perhaps after a delay) *except* if the
-// handler function on the server side does not return.  Thus there
-// is no need to implement your own timeouts around Call().
-//
-// look at the comments in ../labrpc/labrpc.go for more details.
-//
-// if you're having trouble getting RPC to work, check that you've
-// capitalized all field names in structs passed over RPC, and
-// that the caller passes the address of the reply struct with &, not
-// the struct itself.
-//
-// func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-// 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-// 	return ok
-// }
 
 //
 // the service using Raft (e.g. a k/v server) wants to start
@@ -297,12 +216,11 @@ func (rf *Raft) killed() bool {
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
 func (rf *Raft) ticker() {
-	for !rf.killed() {
+	for rf.killed() == false {
 
 		// Your code here to check if a leader election should
 		// be started and to randomize sleeping time using
 		// time.Sleep().
-
 		time.Sleep(rf.heartBeat)
 		rf.mu.Lock()
 		if rf.state == Leader {
@@ -347,15 +265,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
 
-	//还没看懂这边持久化日志相关
 	rf.applyCh = applyCh
 	rf.applyCond = sync.NewCond(&rf.mu)
+
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
-	go rf.applyer()
+
+	go rf.applier()
 	return rf
 }
 
@@ -364,11 +283,12 @@ func (rf *Raft) apply() {
 	DPrintf("[%v]: rf.applyCond.Broadcast()", rf.me)
 }
 
-func (rf *Raft) applyer() {
+func (rf *Raft) applier() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
 	for !rf.killed() {
+		// all server rule 1
 		if rf.commitIndex > rf.lastApplied && rf.log.lastLog().Index > rf.lastApplied {
 			rf.lastApplied++
 			applyMsg := ApplyMsg{

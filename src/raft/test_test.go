@@ -8,12 +8,14 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -26,9 +28,12 @@ func TestInitialElection2A(t *testing.T) {
 
 	cfg.begin("Test (2A): initial election")
 
+	time.Sleep(time.Second)
+
 	// is a leader elected?
 	cfg.checkOneLeader()
 
+	time.Sleep(time.Second)
 	// sleep a bit to avoid racing with followers learning of the
 	// election, then check that all peers agree on the term.
 	time.Sleep(50 * time.Millisecond)
@@ -93,7 +98,10 @@ func TestManyElections2A(t *testing.T) {
 
 	cfg.begin("Test (2A): multiple elections")
 
+	DPrintf("flag1")
+
 	cfg.checkOneLeader()
+	DPrintf("flag1")
 
 	iters := 10
 	for ii := 1; ii < iters; ii++ {
